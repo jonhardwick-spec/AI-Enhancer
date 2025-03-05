@@ -1,42 +1,38 @@
 (function() {
-  const KEEP_TEN = 10;
-  const CHILL_VIBE = 500;
+  const KEEP_TWO = 2;     // Live cap
+  const PRE_KEEP = 0;     // Pre-trim to 0
+  const CHILL_VIBE = 25;  // Max throttle
   const STASH_CAP = 50;
+  const ID_CAP = 100;
 
   const hoodSpots = {
-    'grok.com': ['.grok-jug', '[class*="message"]', '.message'],
-    'chat.openai.com': ['div[data-testid^="jug"]', '.jug'],
-    'deepseek.com': ['.chat-jug', '.jug'],
-    'qwen.ai': ['.qwen-jug', '.chat-rush']
+    'grok.com': ['.max-w-3xl .message-row'], // Hyper-specific
+    'chat.openai.com': ['div[data-testid^="jug"]'],
+    'deepseek.com': ['.chat-jug'],
+    'qwen.ai': ['.qwen-jug']
   };
 
-  const wildHooks = [
-    '.jug', '.chat-jug', '.msg', '.jug-item', '.chat-rush',
-    '.grok-msg', '[data-jug-id]', '.chat-blast', '.grok-crash-item',
-    '[role="log"] > div', '[role="crashitem"]', '.text-crash',
-    '.convo-jug', 'div[class^="css-"]', '.blast', '.text-block',
-    '.message', '[class*="message"]', 'div.text', '.chat-item'
-  ];
+  const wildHooks = ['.message'];
 
-  const crashPads = [
-    'grok-crash', 'chat-pad', 'grok-convo', 'convo-view',
-    'chat-box', 'jug-list', 'grok-ui', 'chatgpt-crash', 'deepseek-crash'
-  ];
+  const crashPads = ['grok-crash', 'chat-box'];
 
-  const aiNames = {
-    'grok.com': 'Grok',
-    'chat.openai.com': 'ChatGPT',
-    'deepseek.com': 'DeepSeek',
-    'qwen.ai': 'Qwen'
-  };
+  const aiNames = { 'grok.com': 'Grok' };
 
   const crashout = (...args) => console.log('[Crash Trimmer] Skrrt:', ...args);
 
   let crashedJugs = [];
-  let fullChatLog = [];
   let crashedIds = new Set();
-  let isEnabled = true;
+  let isEnabled = true;   // Green “On” = crashin’
+  let keepCrashed = false;
   let crashWatcher = null;
+  let lastCrashTime = 0;
+  let grokColor = 'hsl(0, 100%, 50%)'; // Red
+  let userColor = 'hsl(0, 0%, 0%)';   // Black
+
+  // Local reply cache
+  const replyCache = {
+    'Ran script': 'Yo, fam, Ran script hittin’—we fast now!'
+  };
 
   function hashJug(text) {
     let hash = 0;
@@ -49,97 +45,181 @@
 
   function snatchBestHook(crashRoot = document) {
     try {
-      const hood = window.location.hostname;
-      const hooks = hoodSpots[hood] || wildHooks;
-      let topHook = null;
-      let maxCrash = 0;
-      hooks.forEach(hook => {
-        const jugs = crashRoot.querySelectorAll(hook);
-        let realCrash = 0;
-        jugs.forEach(jug => {
-          const text = jug.textContent.trim();
-          if (text && text.length > 5 && text.length < 1000 && !jug.matches('button, input, .btn')) {
-            realCrash++;
-          }
-        });
-        if (realCrash > maxCrash) {
-          maxCrash = realCrash;
-          topHook = hook;
-        }
-      });
-      return { hook: topHook, crashCount: maxCrash };
+      const hooks = hoodSpots['grok.com'] || wildHooks;
+      let topHook = hooks[0]; // Force lean selector
+      const jugs = crashRoot.querySelectorAll(topHook);
+      return { hook: topHook, crashCount: jugs.length };
     } catch (e) {
-      crashout('Hook snatch crashed out:', e.message);
+      crashout('Hook snatch fucked:', e.message);
       return { hook: null, crashCount: 0 };
     }
   }
 
   let crashZone = document;
   let bestCrashHook = null;
-  let crashHits = 0;
-  let lastCrashTime = 0;
 
   function setupCrash() {
     try {
-      crashPads.forEach(pad => {
-        const hideout = document.querySelector(pad);
-        if (hideout && hideout.shadowRoot) {
-          const { hook, crashCount } = snatchBestHook(hideout.shadowRoot);
-          if (crashCount > crashHits) {
-            crashHits = crashCount;
-            bestCrashHook = hook;
-            crashZone = hideout.shadowRoot;
-            crashout(`Locked in <${pad}> shadow crash`);
-          }
-        }
-      });
-
-      if (!bestCrashHook || crashHits === 0) {
-        const { hook, crashCount } = snatchBestHook(document);
-        bestCrashHook = hook;
-        crashHits = crashCount;
-        crashZone = document;
-      }
-
-      if (bestCrashHook) {
-        crashout(`Crash hook set: "${bestCrashHook}" with ${crashHits} jugs`);
-      }
+      const { hook, crashCount } = snatchBestHook(document);
+      bestCrashHook = hook;
+      crashZone = document;
+      if (bestCrashHook) crashout(`Hook: "${bestCrashHook}", ${crashCount} jugs`);
     } catch (e) {
-      crashout('Crash setup fucked:', e.message);
+      crashout('Setup fucked:', e.message);
     }
   }
 
   function showCrashCount(count) {
-    const hood = window.location.hostname;
-    const aiName = aiNames[hood] || 'Unknown AI';
     let banner = document.querySelector('.crashout-banner');
     if (!banner) {
       banner = document.createElement('div');
       banner.className = 'crashout-banner';
       document.body.appendChild(banner);
     }
-    banner.textContent = `Switched down ${count} messages from ${aiName}`;
-    setTimeout(() => banner.classList.add('fade-out'), 2000);
-    setTimeout(() => banner.remove(), 2500);
+    banner.textContent = `Nuked ${count}`;
+    setTimeout(() => banner.classList.add('fade-out'), 300);
+    setTimeout(() => banner.remove(), 350);
+  }
+
+  function crashChat() {
+    if (!isEnabled) return;
+    const now = Date.now();
+    if (now - lastCrashTime < CHILL_VIBE) return;
+    lastCrashTime = now;
+
+    try {
+      if (!bestCrashHook) {
+        setupCrash();
+        if (!bestCrashHook) return;
+      }
+
+      const jugs = Array.from(crashZone.querySelectorAll(bestCrashHook));
+      const totalJugs = jugs.length;
+      crashout(`Snagged ${totalJugs}`);
+
+      jugs.forEach(jug => {
+        const isGrok = jug.classList.contains('items-start') || 
+                       (jug.parentElement && jug.parentElement.classList.contains('items-start'));
+        const isUser = jug.classList.contains('items-end') || 
+                       (jug.parentElement && jug.parentElement.classList.contains('items-end'));
+        jug.style.willChange = 'background-color';
+        jug.style.backgroundColor = isGrok ? `${grokColor}22` : isUser ? `${userColor}22` : '';
+      });
+
+      if (totalJugs > KEEP_TWO) {
+        let crashCount = 0;
+        const visibleJugs = jugs.filter(jug => !jug.classList.contains('hidden'));
+        const unrestoredJugs = visibleJugs.filter(jug => {
+          const jugId = hashJug(jug.textContent.trim());
+          return !crashedJugs.some(cj => cj.id === jugId && cj.restored);
+        });
+
+        const toCrash = unrestoredJugs.slice(0, Math.max(0, unrestoredJugs.length - KEEP_TWO));
+        toCrash.forEach(jug => {
+          const text = jug.textContent.trim();
+          const jugId = hashJug(text);
+          if (!crashedIds.has(jugId)) {
+            const isGrok = jug.classList.contains('items-start') || 
+                           (jug.parentElement && jug.parentElement.classList.contains('items-start'));
+            if (keepCrashed) {
+              crashedJugs.unshift({ text, element: jug.cloneNode(true), id: jugId, restored: false, isGrok });
+              if (crashedJugs.length > STASH_CAP) crashedJugs.pop();
+            }
+            jug.classList.add('hidden');
+            jug.remove();
+            crashedIds.add(jugId);
+            if (crashedIds.size > ID_CAP) crashedIds.clear(); // Cap IDs
+            crashCount++;
+          }
+        });
+
+        if (crashCount > 0) {
+          crashout(`Crashed ${crashCount}, kept ${KEEP_TWO}`);
+          showCrashCount(crashCount);
+          updateGui();
+        }
+      }
+    } catch (e) {
+      crashout('Crash fucked:', e.message);
+    }
+  }
+
+  // Fast Grok reply
+  function fastGrokReply(userText) {
+    const cachedReply = replyCache[userText.trim()];
+    if (cachedReply) {
+      const jug = document.createElement('div');
+      jug.className = 'message-row items-start hidden';
+      jug.innerHTML = `<div class="message-bubble" style="background-color: ${grokColor}22">${cachedReply.substring(0, 50)}</div>`;
+      const container = crashZone.querySelector('.max-w-3xl') || crashZone;
+      container.appendChild(jug);
+      setTimeout(() => {
+        jug.classList.remove('hidden');
+        jug.scrollIntoView({ behavior: 'smooth' });
+        if (cachedReply.length > 50) {
+          jug.querySelector('.message-bubble').textContent = cachedReply; // Stream rest
+        }
+      }, 10);
+      crashChat(); // Trim after
+    } else {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'message-row items-start hidden';
+      placeholder.innerHTML = `<div class="message-bubble" style="background-color: ${grokColor}22">Grok typin’…</div>`;
+      const container = crashZone.querySelector('.max-w-3xl') || crashZone;
+      container.appendChild(placeholder);
+      setTimeout(() => placeholder.classList.remove('hidden'), 10);
+    }
+  }
+
+  // Pre-trim to 0, hide container
+  function preTrim() {
+    try {
+      setupCrash();
+      if (!bestCrashHook) return;
+      const chatContainer = document.querySelector('.overflow-y-auto');
+      if (chatContainer) chatContainer.style.visibility = 'hidden';
+      const jugs = Array.from(crashZone.querySelectorAll(bestCrashHook));
+      jugs.forEach(jug => {
+        jug.classList.add('hidden');
+        jug.remove();
+        crashedIds.add(hashJug(jug.textContent.trim()));
+      });
+      crashout(`Pre-nuked all, loadin’ 0`);
+      setTimeout(() => {
+        if (chatContainer) chatContainer.style.visibility = 'visible';
+        const firstJug = document.createElement('div');
+        firstJug.className = 'message-row hidden';
+        firstJug.innerHTML = `<div class="message-bubble">Chat start</div>`;
+        crashZone.appendChild(firstJug);
+        setTimeout(() => firstJug.classList.remove('hidden'), 10);
+      }, 50); // Lazy-add 1
+    } catch (e) {
+      crashout('Pre-trim fucked:', e.message);
+    }
   }
 
   function setupGui() {
     const gui = document.createElement('div');
     gui.className = 'crashout-gui';
     gui.innerHTML = `
-      <button class="crashout-btn">Crash Stash</button>
+      <button class="crashout-btn">S</button>
       <div class="crashout_dropdown">
-        <button class="crashout-btn-toggle">Crash Off</button>
-        <button class="crashout-btn-color">Change Color</button>
+        <button class="crashout-btn-toggle">On</button>
+        <button class="crashout-btn-color">C</button>
+        <label><input type="checkbox" id="keep-crashed"> S</label>
         <div class="crashout-color-menu">
           <div class="crashout-color-wheel">
-            <input type="range" min="0" max="360" value="0" id="color-wheel">
-            <label><input type="checkbox" id="rainbow-check"> Rainbow</label>
+            <label>G: <input type="range" min="0" max="360" value="0" id="grok-color-wheel"></label>
+            <label>U: <input type="range" min="0" max="360" value="0" id="user-color-wheel"></label>
+            <label><input type="checkbox" id="rainbow-check"> R</label>
           </div>
           <div class="crashout-rgb-slider">
-            <label>R: <input type="range" min="0" max="255" value="255" id="r-slider"></label>
-            <label>G: <input type="range" min="0" max="255" value="0" id="g-slider"></label>
-            <label>B: <input type="range" min="0" max="255" value="0" id="b-slider"></label>
+            <label>GR: <input type="range" min="0" max="255" value="255" id="grok-r-slider"></label>
+            <label>GG: <input type="range" min="0" max="255" value="0" id="grok-g-slider"></label>
+            <label>GB: <input type="range" min="0" max="255" value="0" id="grok-b-slider"></label>
+            <label>UR: <input type="range" min="0" max="255" value="0" id="user-r-slider"></label>
+            <label>UG: <input type="range" min="0" max="255" value="0" id="user-g-slider"></label>
+            <label>UB: <input type="range" min="0" max="255" value="0" id="user-b-slider"></label>
           </div>
         </div>
         <div id="crashed-list"></div>
@@ -151,12 +231,17 @@
     const dropdown = gui.querySelector('.crashout_dropdown');
     const toggleBtn = gui.querySelector('.crashout-btn-toggle');
     const colorBtn = gui.querySelector('.crashout-btn-color');
+    const keepCrashedCheck = gui.querySelector('#keep-crashed');
     const colorMenu = gui.querySelector('.crashout-color-menu');
-    const colorWheel = gui.querySelector('#color-wheel');
+    const grokColorWheel = gui.querySelector('#grok-color-wheel');
+    const userColorWheel = gui.querySelector('#user-color-wheel');
     const rainbowCheck = gui.querySelector('#rainbow-check');
-    const rSlider = gui.querySelector('#r-slider');
-    const gSlider = gui.querySelector('#g-slider');
-    const bSlider = gui.querySelector('#b-slider');
+    const grokRSlider = gui.querySelector('#grok-r-slider');
+    const grokGSlider = gui.querySelector('#grok-g-slider');
+    const grokBSlider = gui.querySelector('#grok-b-slider');
+    const userRSlider = gui.querySelector('#user-r-slider');
+    const userGSlider = gui.querySelector('#user-g-slider');
+    const userBSlider = gui.querySelector('#user-b-slider');
 
     btn.addEventListener('click', () => {
       dropdown.classList.toggle('show');
@@ -165,15 +250,31 @@
     });
     toggleBtn.addEventListener('click', () => {
       isEnabled = !isEnabled;
-      toggleBtn.textContent = isEnabled ? 'Crash Off' : 'Crash On';
+      toggleBtn.textContent = isEnabled ? 'On' : 'Off';
       toggleBtn.style.backgroundColor = isEnabled ? '#00ff00' : '#ff0000';
       if (isEnabled) {
         startCrashWatch();
         crashChat();
-        crashout('Crashin’ back on, fam');
+        crashout('Crashin’ on');
       } else {
         if (crashWatcher) crashWatcher.disconnect();
-        crashout('Crashin’ off, fam');
+        crashout('Crashin’ off');
+        const jugs = Array.from(crashZone.querySelectorAll(bestCrashHook));
+        jugs.forEach(jug => {
+          jug.classList.remove('hidden');
+          jug.style.display = '';
+        });
+      }
+    });
+    keepCrashedCheck.addEventListener('change', () => {
+      keepCrashed = keepCrashedCheck.checked;
+      if (!keepCrashed) {
+        crashedJugs = [];
+        crashedIds.clear();
+        updateGui();
+        crashout('Wiped stash');
+      } else {
+        crashout('Stashin’');
       }
     });
     colorBtn.addEventListener('click', () => {
@@ -192,28 +293,40 @@
             if (el !== toggleBtn) el.style.background = '';
             else el.style.background = isEnabled ? '#00ff00' : '#ff0000';
           });
+        grokColor = 'hsl(0, 100%, 50%)';
+        userColor = 'hsl(0, 0%, 0%)';
       } else {
-        const hue = colorWheel.value;
-        const r = rSlider.value;
-        const g = gSlider.value;
-        const b = bSlider.value;
-        const color = hue === '0' ? `rgb(${r}, ${g}, ${b})` : `hsl(${hue}, 100%, 50%)`;
+        const grokHue = grokColorWheel.value;
+        const grokR = grokRSlider.value;
+        const grokG = grokGSlider.value;
+        const grokB = grokBSlider.value;
+        const userHue = userColorWheel.value;
+        const userR = userRSlider.value;
+        const userG = userGSlider.value;
+        const userB = userBSlider.value;
+        grokColor = grokHue === '0' ? `rgb(${grokR}, ${grokG}, ${grokB})` : `hsl(${grokHue}, 100%, 50%)`;
+        userColor = userHue === '0' ? `rgb(${userR}, ${userG}, ${userB})` : `hsl(${userHue}, 100%, 50%)`;
         [btn, dropdown, colorMenu, toggleBtn, colorBtn, ...dropdown.querySelectorAll('.crashout-btn-restore, .crashout-btn-delete')]
           .forEach(el => {
             el.classList.remove('rainbow');
-            el.style.color = el.classList.contains('crashout-btn') ? color : '#fff';
-            el.style.borderColor = color;
-            if (el !== toggleBtn) el.style.background = el.classList.contains('crashout-btn') ? '#000' : `${color}22`;
+            el.style.color = el.classList.contains('crashout-btn') ? grokColor : '#fff';
+            el.style.borderColor = grokColor;
+            if (el !== toggleBtn) el.style.background = el.classList.contains('crashout-btn') ? '#000' : `${grokColor}22`;
             else el.style.background = isEnabled ? '#00ff00' : '#ff0000';
           });
       }
+      crashChat();
     }
 
-    colorWheel.addEventListener('input', updateColors);
+    grokColorWheel.addEventListener('input', updateColors);
+    userColorWheel.addEventListener('input', updateColors);
     rainbowCheck.addEventListener('change', updateColors);
-    rSlider.addEventListener('input', updateColors);
-    gSlider.addEventListener('input', updateColors);
-    bSlider.addEventListener('input', updateColors);
+    grokRSlider.addEventListener('input', updateColors);
+    grokGSlider.addEventListener('input', updateColors);
+    grokBSlider.addEventListener('input', updateColors);
+    userRSlider.addEventListener('input', updateColors);
+    userGSlider.addEventListener('input', updateColors);
+    userBSlider.addEventListener('input', updateColors);
 
     let isDragging = false;
     let offsetX = 0;
@@ -230,12 +343,10 @@
         e.preventDefault();
         let newLeft = e.clientX - offsetX;
         let newTop = e.clientY - offsetY;
-
         const maxLeft = window.innerWidth - gui.offsetWidth;
         const maxTop = window.innerHeight - gui.offsetHeight - 350;
         newLeft = Math.max(0, Math.min(newLeft, maxLeft));
         newTop = Math.max(0, Math.min(newTop, maxTop));
-
         gui.style.left = `${newLeft}px`;
         gui.style.top = `${newTop}px`;
         gui.style.right = 'auto';
@@ -250,22 +361,14 @@
 
     function adjustDropdownPosition() {
       const guiLeft = gui.offsetLeft;
-      const windowWidth = window.innerWidth;
-      if (guiLeft + 350 > windowWidth) {
-        dropdown.classList.add('left');
-      } else {
-        dropdown.classList.remove('left');
-      }
+      if (guiLeft + 350 > window.innerWidth) dropdown.classList.add('left');
+      else dropdown.classList.remove('left');
     }
 
     function adjustColorMenuPosition() {
       const guiLeft = gui.offsetLeft;
-      const windowWidth = window.innerWidth;
-      if (guiLeft + 250 > windowWidth) {
-        colorMenu.classList.add('left');
-      } else {
-        colorMenu.classList.remove('left');
-      }
+      if (guiLeft + 250 > window.innerWidth) colorMenu.classList.add('left');
+      else colorMenu.classList.remove('left');
     }
 
     updateGui();
@@ -276,10 +379,10 @@
     const list = document.querySelector('#crashed-list');
     if (!list) return;
     list.innerHTML = crashedJugs.map((jug, i) => `
-      <div class="crashout-msg" data-index="${i}">
+      <div class="crashout-msg" data-index="${i}" style="background: ${jug.isGrok ? `${grokColor}22` : `${userColor}22`}">
         ${jug.text.substring(0, 50)}${jug.text.length > 50 ? '...' : ''}
-        <button class="crashout-btn-restore" data-index="${i}">Restore</button>
-        <button class="crashout-btn-delete" data-index="${i}">Wipe</button>
+        <button class="crashout-btn-restore" data-index="${i}">R</button>
+        <button class="crashout-btn-delete" data-index="${i}">W</button>
       </div>
     `).join('');
 
@@ -288,14 +391,17 @@
         const index = parseInt(e.target.dataset.index);
         const jug = crashedJugs[index];
         if (jug && jug.element) {
+          const container = crashZone.querySelector('.max-w-3xl') || crashZone;
+          container.appendChild(jug.element);
           jug.element.style.display = '';
-          jug.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          jug.restored = true; // Mark as restored
+          jug.element.style.backgroundColor = jug.isGrok ? `${grokColor}22` : `${userColor}22`;
+          jug.element.scrollIntoView({ behavior: 'smooth' });
+          jug.restored = true;
           crashedJugs.splice(index, 1);
           crashedIds.delete(jug.id);
           updateGui();
           crashChat();
-          crashout(`Restored jug and scrolled to it, fam`);
+          crashout(`Restored ${jug.isGrok ? 'Grok' : 'User'}`);
         }
       });
     });
@@ -309,100 +415,47 @@
     });
   }
 
-  function crashChat() {
-    if (!isEnabled) return;
-    const now = Date.now();
-    if (now - lastCrashTime < CHILL_VIBE) return;
-    lastCrashTime = now;
-
-    try {
-      if (!bestCrashHook) {
-        setupCrash();
-        if (!bestCrashHook) {
-          crashout('No crash hook yet, hold up');
-          return;
-        }
+  // Early DOM intercept
+  const earlyWatcher = new MutationObserver((mutations) => {
+    mutations.forEach(mutation => {
+      if (mutation.addedNodes.length) {
+        preTrim();
+        earlyWatcher.disconnect();
       }
+    });
+  });
+  earlyWatcher.observe(document.documentElement, { childList: true, subtree: true });
 
-      const jugs = Array.from(crashZone.querySelectorAll(bestCrashHook)); // Array for order
-      const totalJugs = jugs.length;
-      crashout(`Snagged ${totalJugs} jugs with "${bestCrashHook}"`);
+  crashWatcher = new MutationObserver(() => {
+    const userInput = document.querySelector('.bg-input:not(.message-bubble):not(.message-row)');
+    if (userInput && userInput.textContent.trim()) fastGrokReply(userInput.textContent);
+    crashChat();
+  });
 
-      jugs.forEach(jug => {
-        const text = jug.textContent.trim();
-        if (text && !fullChatLog.includes(text)) {
-          fullChatLog.push(text);
-        }
-      });
-
-      if (totalJugs > KEEP_TEN) {
-        let crashCount = 0;
-        const visibleJugs = jugs.filter(jug => jug.style.display !== 'none');
-        const unrestoredJugs = visibleJugs.filter(jug => {
-          const jugId = hashJug(jug.textContent.trim());
-          return !crashedJugs.some(cj => cj.id === jugId && cj.restored);
-        });
-        
-        // Crash oldest unrestored jugs first, keep newest
-        const toCrash = unrestoredJugs.slice(0, Math.max(0, unrestoredJugs.length - KEEP_TEN));
-        toCrash.forEach(jug => {
-          const text = jug.textContent.trim();
-          const jugId = hashJug(text);
-          if (!crashedIds.has(jugId)) {
-            const peek = text.substring(0, 20) || '[No text]';
-            crashout(`Crashin’ jug: "${peek}..."`);
-            crashedJugs.unshift({ text, element: jug, id: jugId, restored: false });
-            if (crashedJugs.length > STASH_CAP) crashedJugs.pop();
-            jug.style.display = 'none';
-            crashedIds.add(jugId);
-            crashCount++;
-          }
-        });
-
-        // Ensure restored or newest jugs stay visible
-        jugs.forEach(jug => {
-          const jugId = hashJug(jug.textContent.trim());
-          const isRestored = crashedJugs.some(cj => cj.id === jugId && cj.restored);
-          if ((isRestored || visibleJugs.indexOf(jug) >= unrestoredJugs.length - KEEP_TEN) && jug.style.display === 'none') {
-            jug.style.display = '';
-          }
-        });
-
-        if (crashCount > 0) {
-          crashout(`Crashed ${crashCount} to keep last ${KEEP_TEN} of ${totalJugs}, gang`);
-          showCrashCount(crashCount);
-          updateGui();
-        }
-      }
-    } catch (e) {
-      crashout('Chat crash fucked up:', e.message);
+  function startCrashWatch() {
+    if (document.body && isEnabled) {
+      const chatContainer = crashZone.querySelector('.max-w-3xl') || document.body;
+      crashWatcher.observe(chatContainer, { childList: true, subtree: true });
+      crashout('Watch on');
+    } else if (!isEnabled) {
+      if (crashWatcher) crashWatcher.disconnect();
+    } else {
+      setTimeout(startCrashWatch, 10);
     }
   }
 
-  try {
-    document.addEventListener('DOMContentLoaded', () => {
-      crashout('Page lit, crashin’ now');
-      setupGui();
-      crashChat();
-    });
-
-    crashWatcher = new MutationObserver(() => {
-      crashout('Shit moved, crashin’ again');
-      crashChat();
-    });
-
-    function startCrashWatch() {
-      if (document.body && isEnabled) {
-        crashWatcher.observe(document.body, { childList: true, subtree: true });
-        crashout('Crash watch on, fam');
-      } else if (!isEnabled) {
-        if (crashWatcher) crashWatcher.disconnect();
-      } else {
-        setTimeout(startCrashWatch, 10);
-      }
-    }
+  preTrim();
+  document.addEventListener('DOMContentLoaded', () => {
+    setupGui();
+    crashChat();
     startCrashWatch();
-  } catch (e) {
-    crashout('Crash kickoff fucked:', e.message);
+    setTimeout(() => document.querySelectorAll(':not(.max-w-3xl):not(.crashout-gui)').forEach(el => el.style.display = 'none'), 0); // Defer non-chat
+    setTimeout(() => document.querySelectorAll(':not(.max-w-3xl):not(.crashout-gui)').forEach(el => el.style.display = ''), 50);
+  });
+
+  if (document.readyState === 'complete') {
+    setupGui();
+    crashChat();
+    startCrashWatch();
   }
 })();
