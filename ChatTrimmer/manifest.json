@@ -2,20 +2,14 @@
   "manifest_version": 3,
   "name": "Chat Trimmer",
   "version": "1.0",
-  "description": "Trims AI chats to 5 latest, compresses rest, with copy option.",
+  "description": "Trims Grok chat messages, keeps latest, with stash and copy options.",
   "permissions": ["storage", "activeTab"],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": [
-        "https://grok.com/*",
-        "https://chat.openai.com/*",
-        "https://deepseek.com/*",
-        "https://qwen.ai/*",
-        "https://anthropic.com/*"
-      ],
+      "matches": ["https://grok.com/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
     }

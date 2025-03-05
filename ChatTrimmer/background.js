@@ -1,17 +1,13 @@
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.sync.set({ isEnabled: true, keepCrashed: false });
-});
-
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === 'getState') {
-    chrome.storage.sync.get(['isEnabled', 'keepCrashed'], (data) => {
-      sendResponse(data);
+  try {
+    chrome.storage.sync.set({ isEnabled: true, keepCrashed: false }, () => {
+      if (chrome.runtime.lastError) {
+        console.error('[Chat Trimmer Background] Storage set failed:', chrome.runtime.lastError);
+      } else {
+        console.log('[Chat Trimmer Background] Defaults set: isEnabled=true, keepCrashed=false');
+      }
     });
-    return true;
-  } else if (request.action === 'setState') {
-    chrome.storage.sync.set(request.state, () => {
-      sendResponse({ success: true });
-    });
-    return true;
+  } catch (e) {
+    console.error('[Chat Trimmer Background] Install failed:', e.message);
   }
 });
