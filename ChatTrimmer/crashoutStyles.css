@@ -1,0 +1,157 @@
+.crashout-banner {
+  position: fixed;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #ff0000;
+  color: #fff;
+  padding: 5px 10px;
+  border-radius: 5px;
+  z-index: 9999;
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+  opacity: 1;
+  transition: opacity 0.5s ease-out;
+}
+
+.crashout-banner.fade-out {
+  opacity: 0;
+}
+
+.crashout-gui {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 9999;
+  cursor: move;
+}
+
+.crashout-btn {
+  background: #000;
+  color: #ff0000; /* Default, JS overrides */
+  border: none;
+  padding: 10px 15px;
+  border-radius: 5px;
+  font-family: Arial, sans-serif;
+  font-size: 16px;
+}
+
+.crashout_dropdown {
+  position: absolute;
+  top: 45px;
+  background: #1a1a1a; /* Default, JS overrides */
+  color: #fff;
+  border: 1px solid #ff0000; /* Default, JS overrides */
+  border-radius: 5px;
+  padding: 15px;
+  max-height: 350px;
+  overflow-y: auto;
+  width: 350px;
+  display: none;
+}
+
+.crashout_dropdown.left {
+  right: auto;
+  left: 0;
+}
+
+.crashout_dropdown.show {
+  display: block;
+}
+
+.crashout-msg {
+  padding: 8px;
+  border-bottom: 1px solid #333;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.crashout-msg:hover {
+  background: #333;
+}
+
+.crashout-btn-restore, .crashout-btn-delete, .crashout-btn-grab, .crashout-btn-color {
+  background: #ff0000; /* Default, JS overrides */
+  color: #fff;
+  border: none;
+  padding: 4px 8px;
+  margin-left: 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.crashout-color-menu {
+  position: absolute;
+  top: 45px;
+  background: #1a1a1a; /* Default, JS overrides */
+  border: 1px solid #ff0000; /* Default, JS overrides */
+  border-radius: 5px;
+  padding: 15px;
+  width: 250px;
+  display: none;
+}
+
+.crashout-color-menu.show {
+  display: block;
+}
+
+.crashout-color-menu.left {
+  right: auto;
+  left: 0;
+}
+
+.crashout-color-wheel {
+  margin-top: 10px;
+}
+
+.crashout-color-wheel input[type="range"] {
+  width: 100%;
+  background: linear-gradient(to right, red, orange, yellow, green, cyan, blue, violet);
+  -webkit-appearance: none;
+  height: 10px;
+  border-radius: 5px;
+}
+
+.crashout-color-wheel input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  background: #fff;
+  border: 2px solid #000;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.crashout-rgb-slider {
+  margin-top: 10px;
+}
+
+.crashout-rgb-slider label {
+  display: block;
+  margin: 5px 0;
+  font-size: 12px;
+}
+
+.crashout-rgb-slider input[type="range"] {
+  width: 100%;
+}
+
+#r-slider { background: linear-gradient(to right, #000, #f00); }
+#g-slider { background: linear-gradient(to right, #000, #0f0); }
+#b-slider { background: linear-gradient(to right, #000, #00f); }
+
+/* Rainbow animation */
+@keyframes rainbow {
+  0% { color: red; border-color: red; background: rgba(255, 0, 0, 0.2); }
+  16% { color: orange; border-color: orange; background: rgba(255, 165, 0, 0.2); }
+  33% { color: yellow; border-color: yellow; background: rgba(255, 255, 0, 0.2); }
+  50% { color: green; border-color: green; background: rgba(0, 128, 0, 0.2); }
+  66% { color: cyan; border-color: cyan; background: rgba(0, 255, 255, 0.2); }
+  83% { color: blue; border-color: blue; background: rgba(0, 0, 255, 0.2); }
+  100% { color: violet; border-color: violet; background: rgba(127, 0, 255, 0.2); }
+}
+
+.rainbow {
+  animation: rainbow 3s infinite linear;
+}

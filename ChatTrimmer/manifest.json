@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "ChatTrimmerCrashout",
+  "version": "1.0",
+  "description": "Keep chats crashin’ to the last 10, no cap",
+  "permissions": ["activeTab", "downloads"],
+  "content_scripts": [
+    {
+      "matches": [
+        "*://grok.com/*",
+        "*://chat.openai.com/*",
+        "*://*.deepseek.com/*",
+        "*://*.qwen.ai/*"
+      ],
+      "js": ["crashoutScript.js"],
+      "run_at": "document_start",
+      "css": ["crashoutStyles.css"]
+    }
+  ]
+}
