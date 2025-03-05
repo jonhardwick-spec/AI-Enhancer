@@ -1,20 +1,27 @@
 {
   "manifest_version": 3,
-  "name": "ChatTrimmerCrashout",
+  "name": "Chat Trimmer",
   "version": "1.0",
-  "description": "Keep chats crashin’ to the last 10, no cap",
-  "permissions": ["activeTab", "downloads"],
+  "description": "Trims AI chats to 5 latest, compresses rest, with copy option.",
+  "permissions": ["storage", "activeTab"],
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
       "matches": [
-        "*://grok.com/*",
-        "*://chat.openai.com/*",
-        "*://*.deepseek.com/*",
-        "*://*.qwen.ai/*"
+        "https://grok.com/*",
+        "https://chat.openai.com/*",
+        "https://deepseek.com/*",
+        "https://qwen.ai/*",
+        "https://anthropic.com/*"
       ],
-      "js": ["crashoutScript.js"],
-      "run_at": "document_start",
-      "css": ["crashoutStyles.css"]
+      "js": ["content.js"],
+      "run_at": "document_idle"
     }
-  ]
+  ],
+  "options_page": "options.html",
+  "action": {
+    "default_title": "Chat Trimmer"
+  }
 }
