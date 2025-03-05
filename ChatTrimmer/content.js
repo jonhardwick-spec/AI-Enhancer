@@ -1,10 +1,10 @@
 (function() {
-  const KEEP_MESSAGES = 5; // Total visible messages
-  const CHILL_VIBE = 10; // Throttle in ms
-  const STASH_CAP = 50; // Max stashed messages
-  const ID_CAP = 100; // Max unique IDs tracked
-  const HEAVY_LOAD_THRESHOLD = 100; // Messages triggering heavy load
-  const MUTATION_THRESHOLD = 50; // Mutations in 5s
+  const KEEP_MESSAGES = 5;
+  const CHILL_VIBE = 50;
+  const STASH_CAP = 50;
+  const ID_CAP = 100;
+  const HEAVY_LOAD_THRESHOLD = 100;
+  const MUTATION_THRESHOLD = 50;
 
   const hoodSpots = { 'grok.com': ['.message-row', '.message-bubble'] };
   const wildHooks = ['.message'];
@@ -24,6 +24,11 @@
   let notificationBanner = null;
   let mutationCount = 0;
   let lastMutationCheck = Date.now();
+  let isHeavyLoadWarning = false;
+  let isMenuOpen = false;
+  let isTurboMode = false;
+  let matrixCanvas = null;
+  let originalStyles = new Map();
 
   const replyCache = { 'Ran script': 'Yo, fam, Ran script hittin’—we fast now!' };
 
@@ -78,7 +83,7 @@
     }
   }
 
-  // Show notification banner (red/black themed)
+  // Show notification banner
   function showNotification(message) {
     if (!notificationBanner) {
       notificationBanner = document.createElement('div');
@@ -122,6 +127,20 @@
     }
   }
 
+  // Suppress network errors
+  function suppressNetworkErrors() {
+    const originalFetch = window.fetch;
+    window.fetch = function(url, options) {
+      return originalFetch(url, options).catch(err => {
+        if (url.includes('/api/log_metric') || url.includes('/rest/app-chat/conversations') || url.includes('/api/statsig/log_event')) {
+          crashout(`Suppressed network error for ${url}: ${err.message}`);
+          return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+        }
+        throw err;
+      });
+    };
+  }
+
   // Trim chat messages
   function crashChat() {
     if (!isEnabled || !chatContainer) return;
@@ -145,6 +164,7 @@
           chrome.storage.sync.set({ keepCrashed });
           crashout('Heavy load detected, disabled keepCrashed');
           showNotification('Heavy load detected - Stash disabled');
+          isHeavyLoadWarning = true;
           updateGui();
         }
         mutationCount = 0;
@@ -259,45 +279,79 @@
     }
   }
 
-  // Setup GUI with drag, resize, and cleaner look
+  // Setup GUI with hover circle and expandable menu
   function setupGui() {
     try {
-      if (document.querySelector('.crashout-gui')) return;
-      crashout('Setting up GUI');
-      const gui = document.createElement('div');
-      gui.className = 'crashout-gui';
-      gui.style.cssText = `
-        position: fixed; top: 10px; right: 10px; z-index: 1000; background: #000; 
-        border: 2px solid #ff0000; border-radius: 8px; padding: 10px; 
-        width: 250px; min-width: 250px; min-height: 150px; color: #ff0000; 
-        font-family: 'Courier New', monospace; overflow: hidden; box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+      if (document.querySelector('.crashout-circle')) return;
+      crashout('Setting up GUI circle');
+      const circle = document.createElement('div');
+      circle.className = 'crashout-circle';
+      circle.style.cssText = `
+        position: fixed; bottom: 20px; right: 20px; width: 50px; height: 50px; 
+        background: #ff0000; border-radius: 50%; z-index: 1000; cursor: pointer; 
+        transition: all 0.3s ease; box-shadow: 0 0 15px rgba(255, 0, 0, 0.7);
       `;
-      gui.innerHTML = `
-        <button class="crashout-btn" style="background: #ff0000; color: #000; border: none; padding: 8px; font-size: 14px; cursor: move; width: 100%; border-radius: 4px; margin-bottom: 8px;">Stash</button>
-        <div class="crashout_dropdown" style="display: none; flex-direction: column; gap: 8px; pointer-events: auto;">
-          <button class="crashout-btn-toggle" style="background: ${isEnabled ? '#00ff00' : '#ff0000'}; color: #000; border: none; padding: 8px; font-size: 14px; width: 100%; border-radius: 4px;">${isEnabled ? 'On' : 'Off'}</button>
-          <label style="font-size: 12px;"><input type="checkbox" id="keep-crashed" ${keepCrashed ? 'checked' : ''}> Keep Stashed</label>
-          <button class="crashout-btn-copy" style="display: ${keepCrashed ? 'block' : 'none'}; background: #ff0000; color: #000; border: none; padding: 8px; font-size: 14px; width: 100%; border-radius: 4px;">Copy Log</button>
-          <div id="crashed-list" style="max-height: 100px; overflow-y: auto; margin-top: 8px; font-size: 12px;"></div>
+      circle.innerHTML = `
+        <div class="crashout-menu" style="display: none; position: absolute; bottom: 60px; right: 0; 
+          width: 250px; background: #000; border: 2px solid #ff0000; border-radius: 8px; 
+          padding: 10px; color: #ff0000; font-family: 'Courier New', monospace; 
+          box-shadow: 0 0 10px rgba(255, 0, 0, 0.5); transform-origin: bottom right; 
+          transition: all 0.3s ease;">
+          <button class="crashout-btn" style="background: #ff0000; color: #000; border: none; padding: 8px; font-size: 14px; width: 100%; border-radius: 4px; margin-bottom: 8px;">Chat Cleaner</button>
+          <div class="crashout_dropdown" style="flex-direction: column; gap: 8px; pointer-events: auto;">
+            <button class="crashout-btn-toggle" style="background: ${isEnabled ? '#00ff00' : '#ff0000'}; color: #000; border: none; padding: 8px; font-size: 14px; width: 100%; border-radius: 4px;">${isEnabled ? 'On' : 'Off'}</button>
+            <label style="font-size: 12px;"><input type="checkbox" id="keep-crashed" ${keepCrashed ? 'checked' : ''}> Keep Stashed</label>
+            <label style="font-size: 12px;"><input type="checkbox" id="turbo-mode"> Turbo Mode</label>
+            <button class="crashout-btn-copy" style="display: ${keepCrashed && !isHeavyLoadWarning ? 'block' : 'none'}; background: #ff0000; color: #000; border: none; padding: 8px; font-size: 14px; width: 100%; border-radius: 4px;">Copy Log</button>
+            <div id="crashed-list" style="max-height: 70px; overflow-y: auto; margin-top: 8px; font-size: 12px;"></div>
+            <div id="heavy-load-warning" style="display: ${isHeavyLoadWarning ? 'block' : 'none'}; color: #ff0000; background: #000; padding: 4px; font-size: 10px; text-align: center; border-top: 1px solid #ff0000; word-wrap: break-word;">Keep Stashed chats was automatically disabled due to high volume</div>
+          </div>
         </div>
-        <div class="resize-handle" style="position: absolute; bottom: 0; right: 0; width: 12px; height: 12px; background: #ff0000; cursor: se-resize;"></div>
       `;
-      document.body.appendChild(gui);
-      crashout('GUI appended to body');
-      updateGui();
+      document.body.appendChild(circle);
 
-      const btn = gui.querySelector('.crashout-btn');
-      const dropdown = gui.querySelector('.crashout_dropdown');
-      const toggleBtn = gui.querySelector('.crashout-btn-toggle');
-      const keepCrashedCheck = gui.querySelector('#keep-crashed');
-      const copyBtn = gui.querySelector('.crashout-btn-copy');
-      const resizeHandle = gui.querySelector('.resize-handle');
+      const menu = circle.querySelector('.crashout-menu');
+      const btn = menu.querySelector('.crashout-btn');
+      const toggleBtn = menu.querySelector('.crashout-btn-toggle');
+      const keepCrashedCheck = menu.querySelector('#keep-crashed');
+      const turboModeCheck = menu.querySelector('#turbo-mode');
+      const copyBtn = menu.querySelector('.crashout-btn-copy');
 
-      btn.addEventListener('click', () => {
-        dropdown.style.display = dropdown.style.display === 'none' ? 'flex' : 'none';
-        crashout('Dropdown toggled');
+      circle.addEventListener('mouseover', () => {
+        if (!isMenuOpen) circle.style.transform = 'scale(1.2)';
+      });
+      circle.addEventListener('mouseout', () => {
+        if (!isMenuOpen) circle.style.transform = 'scale(1)';
       });
 
+      circle.addEventListener('click', () => {
+        isMenuOpen = !isMenuOpen;
+        if (isMenuOpen) {
+          circle.style.width = '60px';
+          circle.style.height = '60px';
+          circle.style.background = '#000';
+          circle.style.boxShadow = '0 0 20px rgba(255, 0, 0, 1)';
+          menu.style.display = 'block';
+          menu.style.transform = 'scale(1)';
+          applyMatrixBackground();
+          if (isTurboMode) applyTurboMode();
+          else applyRedBlackTheme();
+        } else {
+          circle.style.width = '50px';
+          circle.style.height = '50px';
+          circle.style.background = '#ff0000';
+          circle.style.boxShadow = '0 0 15px rgba(255, 0, 0, 0.7)';
+          menu.style.transform = 'scale(0)';
+          setTimeout(() => menu.style.display = 'none', 300);
+          removeMatrixBackground();
+          if (isTurboMode) removeTurboMode();
+          else removeRedBlackTheme();
+        }
+        updateGui();
+        crashout(`Menu ${isMenuOpen ? 'opened' : 'closed'}`);
+      });
+
+      btn.addEventListener('click', () => crashChat());
       toggleBtn.addEventListener('click', () => {
         isEnabled = !isEnabled;
         toggleBtn.textContent = isEnabled ? 'On' : 'Off';
@@ -310,50 +364,31 @@
 
       keepCrashedCheck.addEventListener('change', () => {
         keepCrashed = keepCrashedCheck.checked;
+        isHeavyLoadWarning = !keepCrashed && isHeavyLoadWarning;
         chrome.storage.sync.set({ keepCrashed });
-        copyBtn.style.display = keepCrashed ? 'block' : 'none';
+        copyBtn.style.display = keepCrashed && !isHeavyLoadWarning ? 'block' : 'none';
         updateGui();
         crashout(`Keep crashed set to ${keepCrashed}`);
+      });
+
+      turboModeCheck.addEventListener('change', () => {
+        isTurboMode = turboModeCheck.checked;
+        if (isMenuOpen) {
+          if (isTurboMode) {
+            removeRedBlackTheme();
+            applyTurboMode();
+          } else {
+            removeTurboMode();
+            applyRedBlackTheme();
+          }
+        }
+        crashout(`Turbo Mode ${isTurboMode ? 'enabled' : 'disabled'}`);
       });
 
       copyBtn.addEventListener('click', () => {
         const allMessages = crashedJugs.map(jug => jug.text).join('\n');
         navigator.clipboard.writeText(allMessages).then(() => crashout('Chat log copied'));
       });
-
-      let isDragging = false;
-      let offsetX, offsetY;
-      btn.addEventListener('mousedown', (e) => {
-        isDragging = true;
-        offsetX = e.clientX - gui.offsetLeft;
-        offsetY = e.clientY - gui.offsetTop;
-      });
-      document.addEventListener('mousemove', (e) => {
-        if (isDragging) {
-          gui.style.left = `${e.clientX - offsetX}px`;
-          gui.style.top = `${e.clientY - offsetY}px`;
-          gui.style.right = 'auto';
-        }
-      });
-      document.addEventListener('mouseup', () => isDragging = false);
-
-      let isResizing = false;
-      resizeHandle.addEventListener('mousedown', (e) => {
-        isResizing = true;
-        offsetX = e.clientX;
-        offsetY = e.clientY;
-      });
-      document.addEventListener('mousemove', (e) => {
-        if (isResizing) {
-          const newWidth = Math.max(250, gui.offsetWidth + (e.clientX - offsetX)); // Min width
-          const newHeight = Math.max(150, gui.offsetHeight + (e.clientY - offsetY)); // Min height
-          gui.style.width = `${newWidth}px`;
-          gui.style.height = `${newHeight}px`;
-          offsetX = e.clientX;
-          offsetY = e.clientY;
-        }
-      });
-      document.addEventListener('mouseup', () => isResizing = false);
     } catch (e) {
       crashout('GUI setup failed:', e.message);
       showNotification(`Error on line ${e.lineNumber || 'unknown'}`);
@@ -364,7 +399,9 @@
   function updateGui() {
     try {
       const list = document.querySelector('#crashed-list');
-      if (!list) return;
+      const warning = document.querySelector('#heavy-load-warning');
+      const copyBtn = document.querySelector('.crashout-btn-copy');
+      if (!list || !warning || !copyBtn) return;
       list.innerHTML = crashedJugs.map((jug, i) => `
         <div class="crashout-msg" data-index="${i}" style="background: ${jug.isGrok ? `${grokColor}22` : `${userColor}22`}; padding: 4px; margin: 2px 0; display: flex; justify-content: space-between; border-radius: 4px;">
           <span style="font-size: 12px;">${jug.text.substring(0, 30)}${jug.text.length > 30 ? '...' : ''}</span>
@@ -374,6 +411,8 @@
           </div>
         </div>
       `).join('');
+      warning.style.display = isHeavyLoadWarning ? 'block' : 'none';
+      copyBtn.style.display = keepCrashed && !isHeavyLoadWarning ? 'block' : 'none';
 
       list.querySelectorAll('.crashout-btn-restore').forEach(btn => {
         btn.addEventListener('click', (e) => {
@@ -406,42 +445,182 @@
     }
   }
 
-  // Matrix-themed background
-  function setupMatrixBackground() {
-    const canvas = document.createElement('canvas');
-    canvas.style.cssText = `
+  // Apply Matrix background
+  function applyMatrixBackground() {
+    if (matrixCanvas) return;
+    matrixCanvas = document.createElement('canvas');
+    matrixCanvas.style.cssText = `
       position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
       z-index: -1; pointer-events: none; opacity: 0.2;
     `;
-    document.body.appendChild(canvas);
-    const ctx = canvas.getContext('2d');
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    document.body.appendChild(matrixCanvas);
+    const ctx = matrixCanvas.getContext('2d');
+    matrixCanvas.width = window.innerWidth;
+    matrixCanvas.height = window.innerHeight;
 
     const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     const fontSize = 16;
-    const columns = canvas.width / fontSize;
+    const columns = matrixCanvas.width / fontSize;
     const drops = Array(Math.floor(columns)).fill(1);
 
     function draw() {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, matrixCanvas.width, matrixCanvas.height);
       ctx.font = `${fontSize}px 'Courier New', monospace`;
 
       drops.forEach((y, i) => {
         const text = characters.charAt(Math.floor(Math.random() * characters.length));
-        ctx.fillStyle = Math.random() > 0.5 ? '#ff0000' : '#000'; // Red or black
+        ctx.fillStyle = Math.random() > 0.5 ? '#ff0000' : '#000';
         ctx.fillText(text, i * fontSize, y * fontSize);
-        if (y * fontSize > canvas.height && Math.random() > 0.975) drops[i] = 0;
+        if (y * fontSize > matrixCanvas.height && Math.random() > 0.975) drops[i] = 0;
         drops[i]++;
       });
     }
 
-    setInterval(draw, 50);
+    const interval = setInterval(draw, 50);
     window.addEventListener('resize', () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+      matrixCanvas.width = window.innerWidth;
+      matrixCanvas.height = window.innerHeight;
     });
+    matrixCanvas.dataset.interval = interval;
+  }
+
+  // Remove Matrix background
+  function removeMatrixBackground() {
+    if (matrixCanvas) {
+      clearInterval(matrixCanvas.dataset.interval);
+      matrixCanvas.remove();
+      matrixCanvas = null;
+    }
+  }
+
+  // Apply red and black theme (scoped)
+  function applyRedBlackTheme() {
+    const exclusions = ['crashout-circle', 'crashout-menu', 'message-row', 'message-bubble', 'max-w-3xl', 'btn', 'input'];
+    document.body.style.backgroundColor = '#000';
+    document.body.style.color = '#ff0000';
+    const elements = document.querySelectorAll('body *:not(.crashout-circle):not(.crashout-menu)');
+    elements.forEach(el => {
+      const shouldExclude = exclusions.some(cls => el.classList.contains(cls));
+      if (!shouldExclude) {
+        originalStyles.set(el, {
+          color: el.style.color,
+          backgroundColor: el.style.backgroundColor,
+          borderColor: el.style.borderColor
+        });
+        el.style.color = '#ff0000';
+        if (el.tagName === 'A') el.style.color = '#ff5555';
+        if (el.style.backgroundColor && !el.style.backgroundColor.includes('rgb')) {
+          el.style.backgroundColor = '#1a1a1a';
+        }
+        if (el.style.borderColor) el.style.borderColor = '#ff0000';
+      }
+    });
+    const style = document.createElement('style');
+    style.id = 'red-black-theme';
+    style.textContent = `
+      ::selection { background: #ff0000; color: #000; }
+      input:not(#keep-crashed):not(#turbo-mode), textarea { background: #1a1a1a; color: #ff0000; border: 1px solid #ff0000; }
+      button:not(.crashout-btn):not(.crashout-btn-toggle):not(.crashout-btn-copy):not(.crashout-btn-restore):not(.crashout-btn-delete) {
+        background: #ff0000; color: #000; border: 1px solid #ff0000; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  // Remove red and black theme
+  function removeRedBlackTheme() {
+    const style = document.getElementById('red-black-theme');
+    if (style) style.remove();
+    document.body.style.backgroundColor = '';
+    document.body.style.color = '';
+    originalStyles.forEach((styles, el) => {
+      el.style.color = styles.color;
+      el.style.backgroundColor = styles.backgroundColor;
+      el.style.borderColor = styles.borderColor;
+    });
+    originalStyles.clear();
+  }
+
+  // Apply Turbo Mode (strip to basic HTML)
+  function applyTurboMode() {
+    crashout('Applying Turbo Mode - stripping site');
+    document.body.style.backgroundColor = '#000';
+    document.body.style.color = '#ff0000';
+    const elements = document.querySelectorAll('body > *:not(.crashout-circle):not(.max-w-3xl):not(canvas)');
+    elements.forEach(el => {
+      if (!el.classList.contains('crashout-circle') && !el.classList.contains('max-w-3xl')) {
+        originalStyles.set(el, {
+          display: el.style.display,
+          innerHTML: el.innerHTML
+        });
+        el.style.display = 'none';
+      }
+    });
+    const scripts = document.querySelectorAll('script:not([data-chat-critical])');
+    scripts.forEach(script => script.remove());
+    const styles = document.querySelectorAll('link[rel="stylesheet"], style:not(#red-black-theme)');
+    styles.forEach(style => style.remove());
+    const turboStyle = document.createElement('style');
+    turboStyle.id = 'turbo-mode';
+    turboStyle.textContent = `
+      .max-w-3xl { background: #000; color: #ff0000; }
+      .message-row, .message-bubble { color: #ff0000; }
+      ::selection { background: #ff0000; color: #000; }
+    `;
+    document.head.appendChild(turboStyle);
+    showNotification('Turbo Mode ON - Site stripped for speed!');
+  }
+
+  // Remove Turbo Mode
+  function removeTurboMode() {
+    crashout('Removing Turbo Mode');
+    const turboStyle = document.getElementById('turbo-mode');
+    if (turboStyle) turboStyle.remove();
+    document.body.style.backgroundColor = '';
+    document.body.style.color = '';
+    originalStyles.forEach((styles, el) => {
+      el.style.display = styles.display;
+      el.innerHTML = styles.innerHTML;
+    });
+    originalStyles.clear();
+    showNotification('Turbo Mode OFF - Site restored');
+  }
+
+  // Optimize loading
+  function optimizeLoad() {
+    try {
+      const scripts = document.querySelectorAll('script:not([data-chat-critical])');
+      scripts.forEach(script => {
+        script.defer = true;
+        script.async = true;
+        script.setAttribute('importance', 'low');
+      });
+
+      const images = document.querySelectorAll('img');
+      images.forEach(img => {
+        img.loading = 'lazy';
+        img.decoding = 'async';
+        img.setAttribute('importance', 'low');
+      });
+
+      const styles = document.querySelectorAll('link[rel="stylesheet"]');
+      styles.forEach(style => {
+        if (!style.href.includes('critical')) {
+          style.media = 'print';
+          style.onload = () => style.media = 'all';
+        }
+      });
+
+      const preconnect = document.createElement('link');
+      preconnect.rel = 'preconnect';
+      preconnect.href = 'https://grok.com';
+      document.head.appendChild(preconnect);
+
+      crashout('Optimized load with defer, lazy, and preconnect');
+    } catch (e) {
+      crashout('Load optimization failed:', e.message);
+      showNotification(`Error on line ${e.lineNumber || 'unknown'}`);
+    }
   }
 
   // Start watching for chat changes
@@ -466,7 +645,7 @@
           if (userInput && userInput.textContent.trim()) fastGrokReply(userInput.textContent);
           crashChat();
         });
-        crashWatcher.observe(chatContainer, { childList: true, subtree: true });
+        crashWatcher.observe(chatContainer, { childList: true, subtree: true, attributes: false });
         crashout('Mutation observer started');
       }
     } catch (e) {
@@ -475,37 +654,20 @@
     }
   }
 
-  // Optimize loading with defer and lazy-load
-  function optimizeLoad() {
-    try {
-      const scripts = document.querySelectorAll('script:not([data-chat-critical])');
-      scripts.forEach(script => {
-        script.defer = true;
-        script.async = true;
-      });
-      const images = document.querySelectorAll('img');
-      images.forEach(img => img.loading = 'lazy');
-      crashout('Optimized load with defer and lazy');
-    } catch (e) {
-      crashout('Load optimization failed:', e.message);
-      showNotification(`Error on line ${e.lineNumber || 'unknown'}`);
-    }
-  }
-
-  // Initialize with robust fallback
+  // Initialize
   function initialize() {
     try {
       crashout('Initializing Chat Trimmer');
+      suppressNetworkErrors();
       chrome.storage.sync.get(['isEnabled', 'keepCrashed'], (data) => {
         try {
           isEnabled = data.isEnabled !== undefined ? data.isEnabled : true;
           keepCrashed = data.keepCrashed !== undefined ? data.keepCrashed : true;
           crashout('Storage retrieved:', { isEnabled, keepCrashed });
           setupGui();
-          setupMatrixBackground();
           preTrim();
-          startCrashWatch();
           optimizeLoad();
+          startCrashWatch();
         } catch (e) {
           crashout('Inner init failed:', e.message);
           showNotification(`Error on line ${e.lineNumber || 'unknown'}`);
@@ -522,7 +684,7 @@
   } else {
     document.addEventListener('DOMContentLoaded', initialize);
     setTimeout(() => {
-      if (!document.querySelector('.crashout-gui')) {
+      if (!document.querySelector('.crashout-circle')) {
         crashout('DOMContentLoaded missed, forcing init');
         initialize();
       }
