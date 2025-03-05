@@ -35,6 +35,8 @@
   let crashedJugs = [];
   let fullChatLog = [];
   let crashedIds = new Set();
+  let isEnabled = true;
+  let crashWatcher = null;
 
   function hashJug(text) {
     let hash = 0;
@@ -121,34 +123,13 @@
     setTimeout(() => banner.remove(), 2500);
   }
 
-  function saveAndOpenChatLog() {
-    const hood = window.location.hostname;
-    const aiName = aiNames[hood] || 'UnknownAI';
-    const chatText = fullChatLog.join('\n---\n');
-    const blob = new Blob([chatText], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    chrome.downloads.download({
-      url: url,
-      filename: `${aiName}_fullChatLog.txt`,
-      saveAs: false
-    }, (downloadId) => {
-      chrome.downloads.search({ id: downloadId }, (results) => {
-        if (results && results[0] && results[0].filename) {
-          const filePath = 'file://' + results[0].filename;
-          window.open(filePath, '_blank');
-          URL.revokeObjectURL(url);
-        }
-      });
-    });
-  }
-
   function setupGui() {
     const gui = document.createElement('div');
     gui.className = 'crashout-gui';
     gui.innerHTML = `
       <button class="crashout-btn">Crash Stash</button>
       <div class="crashout_dropdown">
-        <button class="crashout-btn-grab">Grab Chat</button>
+        <button class="crashout-btn-toggle">Crash Off</button>
         <button class="crashout-btn-color">Change Color</button>
         <div class="crashout-color-menu">
           <div class="crashout-color-wheel">
@@ -168,7 +149,7 @@
 
     const btn = gui.querySelector('.crashout-btn');
     const dropdown = gui.querySelector('.crashout_dropdown');
-    const grabBtn = gui.querySelector('.crashout-btn-grab');
+    const toggleBtn = gui.querySelector('.crashout-btn-toggle');
     const colorBtn = gui.querySelector('.crashout-btn-color');
     const colorMenu = gui.querySelector('.crashout-color-menu');
     const colorWheel = gui.querySelector('#color-wheel');
@@ -182,7 +163,19 @@
       colorMenu.classList.remove('show');
       adjustDropdownPosition();
     });
-    grabBtn.addEventListener('click', saveAndOpenChatLog);
+    toggleBtn.addEventListener('click', () => {
+      isEnabled = !isEnabled;
+      toggleBtn.textContent = isEnabled ? 'Crash Off' : 'Crash On';
+      toggleBtn.style.backgroundColor = isEnabled ? '#00ff00' : '#ff0000';
+      if (isEnabled) {
+        startCrashWatch();
+        crashChat();
+        crashout('Crashin’ back on, fam');
+      } else {
+        if (crashWatcher) crashWatcher.disconnect();
+        crashout('Crashin’ off, fam');
+      }
+    });
     colorBtn.addEventListener('click', () => {
       colorMenu.classList.toggle('show');
       adjustColorMenuPosition();
@@ -191,12 +184,13 @@
     function updateColors() {
       const rainbow = rainbowCheck.checked;
       if (rainbow) {
-        [btn, dropdown, colorMenu, grabBtn, colorBtn, ...dropdown.querySelectorAll('.crashout-btn-restore, .crashout-btn-delete')]
+        [btn, dropdown, colorMenu, toggleBtn, colorBtn, ...dropdown.querySelectorAll('.crashout-btn-restore, .crashout-btn-delete')]
           .forEach(el => {
             el.classList.add('rainbow');
             el.style.color = '';
             el.style.borderColor = '';
-            el.style.background = '';
+            if (el !== toggleBtn) el.style.background = '';
+            else el.style.background = isEnabled ? '#00ff00' : '#ff0000';
           });
       } else {
         const hue = colorWheel.value;
@@ -204,12 +198,13 @@
         const g = gSlider.value;
         const b = bSlider.value;
         const color = hue === '0' ? `rgb(${r}, ${g}, ${b})` : `hsl(${hue}, 100%, 50%)`;
-        [btn, dropdown, colorMenu, grabBtn, colorBtn, ...dropdown.querySelectorAll('.crashout-btn-restore, .crashout-btn-delete')]
+        [btn, dropdown, colorMenu, toggleBtn, colorBtn, ...dropdown.querySelectorAll('.crashout-btn-restore, .crashout-btn-delete')]
           .forEach(el => {
             el.classList.remove('rainbow');
             el.style.color = el.classList.contains('crashout-btn') ? color : '#fff';
             el.style.borderColor = color;
-            el.style.background = el.classList.contains('crashout-btn') ? '#000' : `${color}22`;
+            if (el !== toggleBtn) el.style.background = el.classList.contains('crashout-btn') ? '#000' : `${color}22`;
+            else el.style.background = isEnabled ? '#00ff00' : '#ff0000';
           });
       }
     }
@@ -236,8 +231,10 @@
         let newLeft = e.clientX - offsetX;
         let newTop = e.clientY - offsetY;
 
-        newLeft = Math.max(0, Math.min(newLeft, window.innerWidth - gui.offsetWidth));
-        newTop = Math.max(0, Math.min(newTop, window.innerHeight - gui.offsetHeight));
+        const maxLeft = window.innerWidth - gui.offsetWidth;
+        const maxTop = window.innerHeight - gui.offsetHeight - 350;
+        newLeft = Math.max(0, Math.min(newLeft, maxLeft));
+        newTop = Math.max(0, Math.min(newTop, maxTop));
 
         gui.style.left = `${newLeft}px`;
         gui.style.top = `${newTop}px`;
@@ -281,7 +278,7 @@
     list.innerHTML = crashedJugs.map((jug, i) => `
       <div class="crashout-msg" data-index="${i}">
         ${jug.text.substring(0, 50)}${jug.text.length > 50 ? '...' : ''}
-        <button class="crashout-btn-restore" data-index="${i}">Back</button>
+        <button class="crashout-btn-restore" data-index="${i}">Restore</button>
         <button class="crashout-btn-delete" data-index="${i}">Wipe</button>
       </div>
     `).join('');
@@ -292,10 +289,13 @@
         const jug = crashedJugs[index];
         if (jug && jug.element) {
           jug.element.style.display = '';
+          jug.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          jug.restored = true; // Mark as restored
           crashedJugs.splice(index, 1);
           crashedIds.delete(jug.id);
           updateGui();
           crashChat();
+          crashout(`Restored jug and scrolled to it, fam`);
         }
       });
     });
@@ -310,6 +310,7 @@
   }
 
   function crashChat() {
+    if (!isEnabled) return;
     const now = Date.now();
     if (now - lastCrashTime < CHILL_VIBE) return;
     lastCrashTime = now;
@@ -323,7 +324,7 @@
         }
       }
 
-      const jugs = crashZone.querySelectorAll(bestCrashHook);
+      const jugs = Array.from(crashZone.querySelectorAll(bestCrashHook)); // Array for order
       const totalJugs = jugs.length;
       crashout(`Snagged ${totalJugs} jugs with "${bestCrashHook}"`);
 
@@ -336,30 +337,39 @@
 
       if (totalJugs > KEEP_TEN) {
         let crashCount = 0;
-        for (let i = 0; i < totalJugs - KEEP_TEN; i++) {
-          const jug = jugs[i];
-          if (jug && typeof jug.style !== 'undefined') {
-            const text = jug.textContent.trim();
-            const jugId = hashJug(text);
-            if (!crashedIds.has(jugId) && jug.style.display !== 'none') {
-              const peek = text.substring(0, 20) || '[No text]';
-              crashout(`Crashin’ jug ${i + 1}: "${peek}..."`);
-              crashedJugs.unshift({ text, element: jug, id: jugId });
-              if (crashedJugs.length > STASH_CAP) crashedJugs.pop();
-              jug.style.display = 'none';
-              crashedIds.add(jugId);
-              crashCount++;
-            }
+        const visibleJugs = jugs.filter(jug => jug.style.display !== 'none');
+        const unrestoredJugs = visibleJugs.filter(jug => {
+          const jugId = hashJug(jug.textContent.trim());
+          return !crashedJugs.some(cj => cj.id === jugId && cj.restored);
+        });
+        
+        // Crash oldest unrestored jugs first, keep newest
+        const toCrash = unrestoredJugs.slice(0, Math.max(0, unrestoredJugs.length - KEEP_TEN));
+        toCrash.forEach(jug => {
+          const text = jug.textContent.trim();
+          const jugId = hashJug(text);
+          if (!crashedIds.has(jugId)) {
+            const peek = text.substring(0, 20) || '[No text]';
+            crashout(`Crashin’ jug: "${peek}..."`);
+            crashedJugs.unshift({ text, element: jug, id: jugId, restored: false });
+            if (crashedJugs.length > STASH_CAP) crashedJugs.pop();
+            jug.style.display = 'none';
+            crashedIds.add(jugId);
+            crashCount++;
           }
-        }
-        for (let i = totalJugs - KEEP_TEN; i < totalJugs; i++) {
-          const jug = jugs[i];
-          if (jug && typeof jug.style !== 'undefined' && jug.style.display === 'none') {
+        });
+
+        // Ensure restored or newest jugs stay visible
+        jugs.forEach(jug => {
+          const jugId = hashJug(jug.textContent.trim());
+          const isRestored = crashedJugs.some(cj => cj.id === jugId && cj.restored);
+          if ((isRestored || visibleJugs.indexOf(jug) >= unrestoredJugs.length - KEEP_TEN) && jug.style.display === 'none') {
             jug.style.display = '';
           }
-        }
+        });
+
         if (crashCount > 0) {
-          crashout(`Crashed to last ${KEEP_TEN} of ${totalJugs}, gang`);
+          crashout(`Crashed ${crashCount} to keep last ${KEEP_TEN} of ${totalJugs}, gang`);
           showCrashCount(crashCount);
           updateGui();
         }
@@ -376,15 +386,17 @@
       crashChat();
     });
 
-    const crashWatcher = new MutationObserver(() => {
+    crashWatcher = new MutationObserver(() => {
       crashout('Shit moved, crashin’ again');
       crashChat();
     });
 
     function startCrashWatch() {
-      if (document.body) {
+      if (document.body && isEnabled) {
         crashWatcher.observe(document.body, { childList: true, subtree: true });
         crashout('Crash watch on, fam');
+      } else if (!isEnabled) {
+        if (crashWatcher) crashWatcher.disconnect();
       } else {
         setTimeout(startCrashWatch, 10);
       }
