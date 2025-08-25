@@ -1,4 +1,4 @@
-# AI-Enhancer
+# AI-Enhancer - currently working on grok only - simple mode has gui issues - improvements in the works
  A browser extension that trims chat messages for openai/deepseek/grok/qwen
 
 # What it does?
